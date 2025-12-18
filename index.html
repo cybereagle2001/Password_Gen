@@ -343,66 +343,196 @@
       ambiguous: '{}[]()/\\\'"`~,;:.<>'
     };
     
-    // Password Checker
-    const passwordInput = document.getElementById('password-input');
-    const strengthBar = document.getElementById('strength-bar');
-    const strengthText = document.getElementById('strength-text');
-    
-    passwordInput.addEventListener('input', checkPasswordStrength);
-    
-    function checkPasswordStrength() {
-      const password = passwordInput.value;
-      const checks = {
-        length: password.length >= 8,
-        uppercase: /[A-Z]/.test(password),
-        lowercase: /[a-z]/.test(password),
-        numbers: /[0-9]/.test(password),
-        symbols: /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)
-      };
-      
-      // Update checklist
-      updateCheck('check-length', checks.length);
-      updateCheck('check-uppercase', checks.uppercase);
-      updateCheck('check-lowercase', checks.lowercase);
-      updateCheck('check-numbers', checks.numbers);
-      updateCheck('check-symbols', checks.symbols);
-      
-      // Calculate strength
-      const score = Object.values(checks).filter(Boolean).length;
-      let strength, color, width;
-      
-      if (password.length === 0) {
-        strength = 'NOT ANALYZED';
-        color = '#555';
-        width = 0;
-      } else if (score <= 1) {
-        strength = 'VERY WEAK';
-        color = '#EF4444';
-        width = 20;
-      } else if (score === 2) {
-        strength = 'WEAK';
-        color = '#F97316';
-        width = 40;
-      } else if (score === 3) {
-        strength = 'MODERATE';
-        color = '#EAB308';
-        width = 60;
-      } else if (score === 4) {
-        strength = 'STRONG';
-        color = '#2563EB';
-        width = 80;
-      } else {
-        strength = 'VERY STRONG';
-        color = '#00F0FF';
-        width = 100;
-      }
-      
-      strengthBar.style.width = width + '%';
-      strengthBar.style.background = color;
-      strengthBar.style.boxShadow = `0 0 10px ${color}`;
-      strengthText.textContent = strength;
-      strengthText.style.color = color;
+// Password Checker
+const passwordInput = document.getElementById('password-input');
+const strengthBar = document.getElementById('strength-bar');
+const strengthText = document.getElementById('strength-text');
+
+// Common weak passwords and substrings (case-insensitive)
+const commonPasswords = [
+  'password', '123456', '123456789', 'qwerty', 'abc123', 'password123',
+  'admin', 'letmein', 'welcome', 'login', 'monkey', '12345678',
+  '12345', '1234567', 'sunshine', 'iloveyou', 'princess', 'master',
+  'hello', 'freedom', 'whatever', 'qazwsx', 'trustno1', '000000',
+  '111111', '654321', '666666', '7777777', '1q2w3e', '1qaz2wsx',
+  'asdfgh', 'zxcvbn', 'azerty', 'passw0rd', 'p@ssw0rd'
+];
+
+// Keyboard-walk patterns (horizontal only; extend if needed)
+const keyboardPatterns = [
+  'qwerty', 'asdfgh', 'zxcvbn', '123456', '1234567890',
+  'qazwsx', 'zaq12wsx', '1qaz2wsx', '1q2w3e', '1q2w3e4r',
+  'azerty', 'wxcvbn', '!@#$%^', '@#$%^&'
+];
+
+passwordInput.addEventListener('input', checkPasswordStrength);
+
+function checkPasswordStrength() {
+  const password = passwordInput.value;
+  if (!password) {
+    resetStrengthUI('NOT ANALYZED', '#555', 0);
+    return;
+  }
+
+  // Normalize for comparisons
+  const lower = password.toLowerCase();
+
+  // Basic checks
+  const checks = {
+    length: password.length >= 12, // stricter: ≥12 is modern baseline
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    numbers: /[0-9]/.test(password),
+    symbols: /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?~`]/.test(password)
+  };
+
+  // Update checklist UI (if you have it)
+  if (typeof updateCheck === 'function') {
+    updateCheck('check-length', checks.length);
+    updateCheck('check-uppercase', checks.uppercase);
+    updateCheck('check-lowercase', checks.lowercase);
+    updateCheck('check-numbers', checks.numbers);
+    updateCheck('check-symbols', checks.symbols);
+  }
+
+  // --- ADDITIONAL WEAKNESS DETECTIONS ---
+  let weaknesses = [];
+
+  // 1. Exact or substring match in common passwords (fuzzy tolerance)
+  if (commonPasswords.some(p => lower.includes(p))) {
+    weaknesses.push('Contains common password pattern');
+  }
+
+  // 2. Keyboard walks (fuzzy substring)
+  if (keyboardPatterns.some(p => lower.includes(p))) {
+    weaknesses.push('Contains keyboard walk');
+  }
+
+  // 3. Sequential digits or letters (e.g., 123, abc, 321)
+  if (/(\d{3,})/.test(password)) {
+    const seq = RegExp.$1;
+    if (isSequential(seq) || isSequential(seq.split('').reverse().join(''))) {
+      weaknesses.push('Contains sequential digits');
     }
+  }
+
+  if (/([a-z]{3,})/i.test(password)) {
+    const seq = RegExp.$1.toLowerCase();
+    if (isSequentialLetters(seq) || isSequentialLetters(seq.split('').reverse().join(''))) {
+      weaknesses.push('Contains sequential letters');
+    }
+  }
+
+  // 4. Repeated characters (e.g., aaaa, 1111, !!!, or patterns like abab)
+  if (/(.)\1{3,}/.test(password)) {
+    weaknesses.push('Contains repeated characters');
+  }
+
+  // 5. High similarity to username/email? (optional: add context if available)
+
+  // --- Scoring with penalty for weaknesses ---
+  let score = Object.values(checks).filter(Boolean).length;
+
+  // Penalize: if any weakness detected, cap or reduce strength
+  const hasWeakness = weaknesses.length > 0;
+
+  let strength, color, width;
+
+  if (hasWeakness) {
+    // Force downgrade regardless of score
+    if (score >= 5 && password.length >= 12) {
+      strength = 'MODERATE (Weak pattern detected)';
+      color = '#EAB308';
+      width = 50;
+    } else if (score >= 3) {
+      strength = 'WEAK (Avoid predictable patterns)';
+      color = '#F97316';
+      width = 30;
+    } else {
+      strength = 'VERY WEAK (Predictable)';
+      color = '#EF4444';
+      width = 15;
+    }
+  } else {
+    // Original logic, but with stricter thresholds
+    if (score === 0) {
+      strength = 'NOT ANALYZED';
+      color = '#555';
+      width = 0;
+    } else if (score <= 2) {
+      strength = 'VERY WEAK';
+      color = '#EF4444';
+      width = 20;
+    } else if (score === 3) {
+      strength = 'WEAK';
+      color = '#F97316';
+      width = 40;
+    } else if (score === 4) {
+      strength = 'MODERATE';
+      color = '#EAB308';
+      width = 60;
+    } else if (score === 5 && password.length < 12) {
+      strength = 'STRONG (but short)';
+      color = '#2563EB';
+      width = 75;
+    } else if (score === 5 && password.length >= 12) {
+      strength = 'VERY STRONG';
+      color = '#00F0FF';
+      width = 100;
+    }
+  }
+
+  // Update UI
+  strengthBar.style.width = width + '%';
+  strengthBar.style.background = color;
+  strengthBar.style.boxShadow = `0 0 10px ${color}`;
+  strengthText.textContent = strength;
+  strengthText.style.color = color;
+
+  // Optional: tooltip or list of weaknesses (you can display in a <div id="weaknesses">)
+  const weaknessesEl = document.getElementById('weaknesses');
+  if (weaknessesEl) {
+    weaknessesEl.innerHTML = weaknesses.length
+      ? '<ul>' + weaknesses.map(w => `<li>${w}</li>`).join('') + '</ul>'
+      : '';
+  }
+}
+
+// Helper: detect sequential numeric string (e.g., "123", "5678", "4321")
+function isSequential(str) {
+  if (str.length < 3) return false;
+  const digits = str.split('').map(c => parseInt(c, 10));
+  if (digits.some(isNaN)) return false;
+
+  // Check ascending
+  let asc = true, desc = true;
+  for (let i = 1; i < digits.length; i++) {
+    if (digits[i] !== digits[i - 1] + 1) asc = false;
+    if (digits[i] !== digits[i - 1] - 1) desc = false;
+  }
+  return asc || desc;
+}
+
+// Helper: detect sequential letters (e.g., 'abc', 'xyz', 'fed')
+function isSequentialLetters(str) {
+  if (str.length < 3) return false;
+  const codes = str.split('').map(c => c.charCodeAt(0));
+  let asc = true, desc = true;
+  for (let i = 1; i < codes.length; i++) {
+    if (codes[i] !== codes[i - 1] + 1) asc = false;
+    if (codes[i] !== codes[i - 1] - 1) desc = false;
+  }
+  return asc || desc;
+}
+
+// Optional utility to reset UI
+function resetStrengthUI(strength, color, width) {
+  strengthBar.style.width = width + '%';
+  strengthBar.style.background = color;
+  strengthBar.style.boxShadow = width ? `0 0 10px ${color}` : 'none';
+  strengthText.textContent = strength;
+  strengthText.style.color = color;
+}
     
     function updateCheck(id, passed) {
       const element = document.getElementById(id);
